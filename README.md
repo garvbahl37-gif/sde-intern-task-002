@@ -197,7 +197,8 @@ A `4xx` answer is final, so the next click after it starts a new key.
 2. **Zero, negative or fractional amount:** Zod (`z.int().positive()`) answers `422`. Strings, `null`, booleans and numbers above `Number.MAX_SAFE_INTEGER` are rejected too. The schema `CHECK` is a second guard.
 3. **Uneven split:** `splitCents` in `api/src/split.ts` gives everyone the floor, then hands out the remaining cents one each in join order. A test checks every total from 1 to 200 across 1 to 9 people.
 4. **Same request twice:** the second answer is `200` with the same `paidAt`, and the share is paid once. This holds when the two arrive at the same time as well.
-5. **Two people paying one share at once:** exactly one gets `200`, the others get `409` (tested with 5 parallel requests). The page then shows "Someone else paid this share first."
+5. **Two people paying one share at once:** exactly one gets `200`, the others get `409`, and the page then shows "Someone else paid this share first."
+   The guarantee comes from the single conditional `UPDATE`, not from timing. `api/test/pay-race.test.ts` slows every query down so the requests really do interleave. A read-then-write version fails that test, while the plain parallel tests in `payments.edge.test.ts` would not catch it.
 6. **Bill or share that does not exist:** `404`. A real share asked for through the wrong bill is also `404` and stays unpaid.
 7. **API errors or slowness:** each request times out after 10 s. Every response is checked with Zod, and errors render as a message with "Try again". A failed payment leaves the share unpaid with the reason under it. After 4 s the loading state says the server is slow.
 
