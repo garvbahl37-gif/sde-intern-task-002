@@ -52,6 +52,55 @@ export async function createBill(
   return { id: billId, homeId, title, totalCents, shares }
 }
 
+export type PayResult =
+  | { kind: 'paid'; share: Share }
+  | { kind: 'bill_not_found' }
+  | { kind: 'share_not_found' }
+  | { kind: 'conflict' }
+
+// Marks a share as paid, at most once.
+//
+// The write comes first and is conditional: `WHERE paid_at IS NULL`. SQLite runs the UPDATE as
+// one atomic step, so when two requests race, exactly one of them changes the row. The loser
+// changes nothing and falls through to the checks below. Reading first ("is it unpaid?") and
+// writing second would let both requests see "unpaid" and both succeed.
+//
+// The key of the winning request is stored on the share. A repeat of that request (same key)
+// gets the stored result back. Any other key gets a conflict.
+export async function payShare(
+  db: D1Database,
+  billId: string,
+  shareId: string,
+  idempotencyKey: string,
+  paidAt: string,
+): Promise<PayResult> {
+  const updated = await db
+    .prepare(
+      `UPDATE shares SET paid_at = ?1, idempotency_key = ?2
+       WHERE id = ?3 AND bill_id = ?4 AND paid_at IS NULL
+       RETURNING id, member_id, amount_cents, paid_at`,
+    )
+    .bind(paidAt, idempotencyKey, shareId, billId)
+    .first<ShareRow>()
+  if (updated) return { kind: 'paid', share: toShare(updated) }
+
+  // Nothing changed. Either the share does not exist on this bill, or it was already paid.
+  const existing = await db
+    .prepare(
+      `SELECT id, member_id, amount_cents, paid_at, idempotency_key
+       FROM shares WHERE id = ?1 AND bill_id = ?2`,
+    )
+    .bind(shareId, billId)
+    .first<ShareRow & { idempotency_key: string | null }>()
+
+  if (!existing) {
+    const bill = await db.prepare('SELECT id FROM bills WHERE id = ?1').bind(billId).first()
+    return bill ? { kind: 'share_not_found' } : { kind: 'bill_not_found' }
+  }
+  if (existing.idempotency_key === idempotencyKey) return { kind: 'paid', share: toShare(existing) }
+  return { kind: 'conflict' }
+}
+
 type BillShareRow = ShareRow & {
   bill_id: string
   home_id: string

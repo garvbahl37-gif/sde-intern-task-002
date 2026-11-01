@@ -1,4 +1,4 @@
-import type { Home, Member } from '../types'
+import type { Balance, Home, Member } from '../types'
 
 type MemberRow = { id: string; home_id: string; name: string }
 
@@ -49,4 +49,21 @@ export async function addMember(
     .bind(crypto.randomUUID(), name, new Date().toISOString(), homeId)
     .first<MemberRow>()
   return row ? toMember(row) : null
+}
+
+// What each member still owes: the sum of their unpaid shares across all bills of the home.
+// Members with nothing unpaid still appear, with 0. Listed in join order.
+export async function getBalances(db: D1Database, homeId: string): Promise<Balance[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT m.id AS memberId, m.name AS name, COALESCE(SUM(s.amount_cents), 0) AS outstandingCents
+       FROM members m
+       LEFT JOIN shares s ON s.member_id = m.id AND s.paid_at IS NULL
+       WHERE m.home_id = ?1
+       GROUP BY m.id
+       ORDER BY m.position`,
+    )
+    .bind(homeId)
+    .all<Balance>()
+  return results
 }

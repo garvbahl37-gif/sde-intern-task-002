@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { createBill, listBills } from '../data/bills'
-import { addMember, createHome, findHome, listMembers } from '../data/homes'
+import { addMember, createHome, findHome, getBalances, listMembers } from '../data/homes'
 import type { AppEnv } from '../types'
 import { billInput, homeInput, jsonBody, memberInput } from '../validation'
 
@@ -27,6 +27,14 @@ homes.post('/:homeId/members', jsonBody(memberInput), async (c) => {
   const member = await addMember(c.env.DB, c.req.param('homeId'), name)
   if (!member) return c.json({ error: HOME_NOT_FOUND }, 404)
   return c.json(member, 201)
+})
+
+homes.get('/:homeId/balances', async (c) => {
+  const homeId = c.req.param('homeId')
+  const home = await findHome(c.env.DB, homeId)
+  if (!home) return c.json({ error: HOME_NOT_FOUND }, 404)
+  const balances = await getBalances(c.env.DB, homeId)
+  return c.json({ balances })
 })
 
 homes.get('/:homeId/bills', async (c) => {
