@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRef } from 'react'
 import { ApiError, type Bill, payShare, type Share } from '../api'
 import { formatCents } from '../money'
-import { balancesQuery, billsQuery, homeKey, replaceShare } from '../queries'
+import { homeKey, recordPayment } from '../queries'
 import { Amount } from './Amount'
 import { Avatar } from './Avatar'
 import { errorMessage } from './states'
@@ -74,10 +74,7 @@ function ShareRow({ homeId, billId, share, name }: ShareRowProps) {
     },
     onSuccess: (paid) => {
       idempotencyKey.current = null
-      queryClient.setQueryData(billsQuery(homeId).queryKey, (bills) =>
-        bills ? replaceShare(bills, billId, paid) : bills,
-      )
-      void queryClient.invalidateQueries({ queryKey: balancesQuery(homeId).queryKey })
+      return recordPayment(queryClient, homeId, billId, paid)
     },
     onError: (error) => {
       // A 4xx answer is final: the server did not pay with this key, so the next click starts a
