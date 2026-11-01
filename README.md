@@ -155,3 +155,59 @@ You must understand every line you submit. We check this with your video and in 
 5. Paste the repository link and the video link in the application form.
 
 We will run `pnpm install && pnpm check && pnpm typecheck && pnpm test` on your repository.
+
+---
+
+## Decisions
+
+**1. Paying a share is one conditional write, not "read, then write".**
+The pay endpoint runs `UPDATE shares SET paid_at = ?, idempotency_key = ? WHERE id = ? AND bill_id = ? AND paid_at IS NULL RETURNING …`.
+SQLite applies a statement as one atomic step, so when two requests race, exactly one of them changes the row.
+The other changes nothing, reads the row back, and answers `200` with the stored result if its key matches, or `409` if it does not.
+Reading first ("is it unpaid?") and writing second would let both requests see "unpaid" and both succeed.
+Trade-off: the key is stored on the share row instead of in a separate idempotency table. It is simple and needs no cleanup, but a key only means something for one share. Sending the same key for a different share pays that share.
+
+**2. The join order of members is an explicit `position` column.**
+The extra cents of a split go to members in the order they joined, so that order must be exact.
+Timestamps can tie, and SQLite's hidden `rowid` is not something to depend on.
+`position` is assigned inside a single `INSERT … SELECT … FROM homes WHERE id = ?`. That one statement also checks the home exists (0 rows inserted means `404`), and two members added at the same moment cannot get the same number. `UNIQUE (home_id, position)` backs this up in the schema.
+
+**3. The page reuses the same `Idempotency-Key` when you retry a payment.**
+Each share row makes a key on the first click and keeps it until the payment succeeds.
+If a request times out after the server already paid, a retry with a _new_ key would get `409`, and the page would show an error for a payment that worked. With the same key, the retry gets `200` and the original result.
+A `4xx` answer is final, so the next click after it starts a new key.
+
+## Notes for reviewers
+
+**Named constraints** (`api/migrations/0001_init.sql`, each one proved in `api/test/schema.test.ts`):
+
+| Constraint                                                                | What it stops                                                                  |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `members_home_fk`, `bills_home_fk`, `shares_bill_fk`, `shares_member_fk`  | rows that point at a home, bill or member that does not exist                  |
+| `members_position_unique`                                                 | two members in the same place of a home's join order                           |
+| `shares_one_per_member`                                                   | one member getting two shares of the same bill                                 |
+| `bills_total_positive_integer`                                            | a total of zero, below zero, or with fractional cents                          |
+| `shares_amount_non_negative_integer`                                      | a negative or fractional share (0 is allowed: 2 cents for 3 people is 1, 1, 0) |
+| `shares_paid_has_key`                                                     | a share marked paid without the key that paid it, or the other way round       |
+| `homes_name_not_blank`, `members_name_not_blank`, `bills_title_not_blank` | empty or whitespace-only names and titles                                      |
+
+**The cases from the brief:**
+
+1. **Home with no members:** `POST …/bills` answers `422`, and nothing is saved. The page disables the bill form and says to add people first.
+2. **Zero, negative or fractional amount:** Zod (`z.int().positive()`) answers `422`. Strings, `null`, booleans and numbers above `Number.MAX_SAFE_INTEGER` are rejected too. The schema `CHECK` is a second guard.
+3. **Uneven split:** `splitCents` in `api/src/split.ts` gives everyone the floor, then hands out the remaining cents one each in join order. A test checks every total from 1 to 200 across 1 to 9 people.
+4. **Same request twice:** the second answer is `200` with the same `paidAt`, and the share is paid once. This holds when the two arrive at the same time as well.
+5. **Two people paying one share at once:** exactly one gets `200`, the others get `409` (tested with 5 parallel requests). The page then shows "Someone else paid this share first."
+6. **Bill or share that does not exist:** `404`. A real share asked for through the wrong bill is also `404` and stays unpaid.
+7. **API errors or slowness:** each request times out after 10 s. Every response is checked with Zod, and errors render as a message with "Try again". A failed payment leaves the share unpaid with the reason under it. After 4 s the loading state says the server is slow.
+
+**Other choices:**
+- Every error is JSON, including unknown routes (`404`), malformed JSON (`400`), bodies over 16 KB (`413`) and unexpected failures (`500`, with details only in the log).
+- Input is validated before the database is touched. So an invalid body sent to a home that does not exist answers `422`, not `404`.
+- Web stack additions: TanStack Query (loading, error, and retry state), Zod, plain CSS, and self-hosted fonts. There is no form library; the three small forms use React state.
+
+**Extra commands:**
+
+```bash
+pnpm --filter bill-splitter-web test   # unit tests for the web client and money parsing
+```

@@ -94,6 +94,17 @@ describe('members added at the same time', () => {
   })
 })
 
+describe('oversized bodies', () => {
+  it('are refused with a 413 JSON error before they are read', async () => {
+    const response = await call<ErrorBody>('POST', '/api/homes', {
+      body: { name: 'x'.repeat(20 * 1024) },
+    })
+
+    expect(response.status).toBe(413)
+    expect(response.body).toEqual({ error: expect.any(String) })
+  })
+})
+
 describe('unknown routes', () => {
   it('answer 404 with a JSON error', async () => {
     const response = await call<ErrorBody>('GET', '/api/nothing-here')
