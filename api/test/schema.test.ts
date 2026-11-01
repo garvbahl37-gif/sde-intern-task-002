@@ -104,6 +104,17 @@ describe('schema constraints', () => {
     await expect(insert).rejects.toThrow(/FOREIGN KEY/)
   })
 
+  it('rejects a share for a member that does not exist (shares_member_fk)', async () => {
+    const { billId } = await seed()
+    const insert = env.DB.prepare(
+      'INSERT INTO shares (id, bill_id, member_id, amount_cents) VALUES (?, ?, ?, 1)',
+    )
+      .bind(crypto.randomUUID(), billId, 'no-such-member')
+      .run()
+
+    await expect(insert).rejects.toThrow(/FOREIGN KEY/)
+  })
+
   it('rejects a second share for the same member on one bill (shares_one_per_member)', async () => {
     const { billId, memberId } = await seed()
     const insert = env.DB.prepare(

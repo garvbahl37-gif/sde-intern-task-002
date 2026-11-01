@@ -101,7 +101,7 @@ describe('oversized bodies', () => {
     })
 
     expect(response.status).toBe(413)
-    expect(response.body).toEqual({ error: expect.any(String) })
+    expect(response.body).toEqual({ error: expect.stringMatching(/too large/i) })
   })
 })
 

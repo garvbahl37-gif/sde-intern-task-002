@@ -1,5 +1,7 @@
 -- Shared bill splitter schema.
--- Every constraint has a name so an error message says exactly which rule was broken.
+-- Every constraint has a name, so the schema documents itself and each rule can be found and
+-- explained. A failed CHECK reports its name in the error. SQLite reports foreign keys only as
+-- "FOREIGN KEY constraint failed" and UNIQUE keys by their columns.
 -- Timestamps are ISO-8601 UTC strings written by the API.
 
 CREATE TABLE homes (
